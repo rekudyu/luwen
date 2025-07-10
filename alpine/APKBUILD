@@ -1,0 +1,36 @@
+# Contributor: Reku Dyu <rekudyu@protonmail.com>
+# Maintainer: Reku Dyu <rekudyu@protonmail.com>
+pkgname=luwen
+pkgver=0.7.5
+pkgrel=0
+pkgdesc="Tenstorrent system interface library"
+url="https://github.com/tenstorrent/luwen"
+arch="all"
+license="Apache-2.0"
+makedepends="cargo cargo-auditable"
+checkdepends=""
+install=""
+subpackages="$pkgname-dev $pkgname-doc"
+source="$pkgname-$pkgver.tar.gz::https://github.com/https://github.com/tenstorrent/luwen/archive/refs/tags/v$pkgver.tar.gz"
+options="!check"
+builddir="$srcdir/"
+
+prepare() {
+	default_prepare
+
+	cargo fetch --target="$CHOST" --locked
+}
+
+build() {
+	cargo auditable build --frozen --release
+}
+
+check() {
+	cargo test --frozen
+}
+
+package() {
+	# Replace with proper package command(s)
+	:
+}
+
