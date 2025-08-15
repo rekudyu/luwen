@@ -49,7 +49,7 @@ jobs:
                 pkgconfig openssl openssl-dev libffi-dev \
                 ca-certificates curl git unzip \
                 protobuf-dev protoc \
-                python3 py3-pip
+                python3 py3-pip maturin
 
               # Prefer the prebuilt CPython from /opt/python if present
               if [ -x /opt/python/${CP}/bin/python ]; then
@@ -110,7 +110,7 @@ jobs:
                 pkgconfig openssl openssl-dev libffi-dev \
                 ca-certificates curl git unzip \
                 protobuf-dev protoc \
-                python3 py3-pip
+                python3 py3-pip maturin
 
               PYBIN=\$(command -v python3)
               \$PYBIN -m pip install -U pip maturin build
