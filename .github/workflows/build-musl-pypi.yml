@@ -1,4 +1,4 @@
-name: Build 🐍 📦 wheels
+name: Build 🐍 📦 musllinux wheels (Alpine via setup-alpine)
 
 on:
   workflow_dispatch:
@@ -10,60 +10,156 @@ on:
         type: string
 
 jobs:
-  # Build non-abi3 wheels for Python 3.8-3.10
+  # Build non-abi3 wheels for Python 3.8-3.10 on Alpine
   build-py-version-specific:
-    name: Build version-specific wheels 📦
+    name: Build version-specific musllinux wheels 📦
     runs-on: ubuntu-24.04
     strategy:
       matrix:
         python-version: ["3.8", "3.9", "3.10"]
     steps:
-    - name: Checkout
-      uses: actions/checkout@v4
-      with:
-        ref: ${{ inputs.ref }}
-        fetch-tags: true
-        fetch-depth: 0
-    - name: Setup latest alpine linux
-      uses: jirutka/setup-alpine@v1 
-      with:
-        branch: v3.22
-        packages: >
-          py3-pip
-          protoc
-          rust
-          unzip
-      shell: alpine.sh --root {0}
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v5
-      with:
-        python-version: ${{ matrix.python-version }}
-    - name: Install pypa/build
-      run: >-
-        python3 -m
-        pip install
-        build
-        --user
-      shell: alpine.sh {0}
-    - name: Build wheel for Python ${{ matrix.python-version }}
-      uses: PyO3/maturin-action@v1
-      with:
-        target: x86_64
-        manylinux: 2014
-        args: --release --out dist -m crates/pyluwen/Cargo.toml --interpreter python${{ matrix.python-version }}
-        before-script-linux: |
-          which unzip || apt install unzip || echo "not apt"
-          which unzip || yum install unzip || echo "not yum"
-          which unzip
-          PROTOC=protoc-21.12-linux-x86_64.zip
-          if [ "$(arch)" == "i686" ]; then PROTOC=protoc-21.12-linux-x86_32.zip; fi
-          curl -OL https://github.com/protocolbuffers/protobuf/releases/download/v21.12/$PROTOC
-          unzip $PROTOC -d protoc3
-          mv -v protoc3/bin/* /usr/local/bin/
-          mv -v protoc3/include/* /usr/local/include/
-      shell: alpine.sh --root {0}
-    - name: Store the wheel
-      uses: actions/upload-artifact@v4
-      with:
-        name: python-package-py${{ matrix.python-version }}
-        path: dist
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-tags: true
+          fetch-depth: 0
+
+      - name: Setup Alpine (musl) environment
+        uses: jirutka/setup-alpine@v1
+        with:
+            # x86_64 is default; set release to a stable Alpine version if desired.
+            # release: '3.20'
+            packages: >
+              bash
+              build-base
+              clang
+              llvm
+              musl-dev
+              pkgconfig
+              openssl
+              openssl-dev
+              libffi-dev
+              ca-certificates
+              curl
+              git
+              unzip
+              protobuf-dev
+              protoc
+              python3
+              py3-pip
+              rust
+              cargo
+
+      - name: Build wheels inside Alpine
+        shell: alpine.sh {0}
+        run: |
+          set -eux
+
+          # Map matrix Python to CP tags; fallback to system python3 if not available.
+          case "${{ matrix.python-version }}" in
+            "3.8") CP_TAG="cp38-cp38" ;;
+            "3.9") CP_TAG="cp39-cp39" ;;
+            "3.10") CP_TAG="cp310-cp310" ;;
+            *) echo "Unsupported Python ${{ matrix.python-version }}"; exit 1 ;;
+          esac
+
+          # musllinux images typically use /opt/python; with setup-alpine we install python3 via apk.
+          # If you need strict CP tags, use system python but pin headers via py3X-dev; otherwise maturin + system python works for per-version builds if you run in separate jobs/containers.
+          # Try to locate an /opt/python CPython; if not present, use system python3.
+          if [ -x "/opt/python/${CP_TAG}/bin/python" ]; then
+            PYBIN="/opt/python/${CP_TAG}/bin/python"
+          else
+            PYBIN="$(command -v python3)"
+          fi
+
+          "$PYBIN" -m pip install --upgrade pip
+          "$PYBIN" -m pip install maturin
+
+          # Confirm protoc is available
+          protoc --version
+
+          # Build musllinux wheels
+          maturin build \
+            --release \
+            --out dist \
+            -m crates/pyluwen/Cargo.toml \
+            --interpreter "$PYBIN" \
+            --target x86_64-unknown-linux-musl \
+            --compatibility musllinux_1_1
+
+          # Ensure artifacts are owned by the runner user
+          chown -R $(id -u):$(id -g) dist || true
+          ls -l dist
+
+      - name: Upload wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-package-musllinux-py${{ matrix.python-version }}
+          path: dist/*.whl
+
+  # Build abi3 wheel for Python 3.11+ on Alpine
+  build-py-abi3:
+    name: Build abi3 musllinux wheel 📦
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-tags: true
+          fetch-depth: 0
+
+      - name: Setup Alpine (musl) environment
+        uses: jirutka/setup-alpine@v1
+        with:
+            # release: '3.20'
+            packages: >
+              bash
+              build-base
+              clang
+              llvm
+              musl-dev
+              pkgconfig
+              openssl
+              openssl-dev
+              libffi-dev
+              ca-certificates
+              curl
+              git
+              unzip
+              protobuf-dev
+              protoc
+              python3
+              py3-pip
+              rust
+              cargo
+
+      - name: Build abi3 wheel inside Alpine
+        shell: alpine.sh {0}
+        run: |
+          set -eux
+
+          PYBIN="$(command -v python3)"
+          "$PYBIN" -m pip install --upgrade pip
+          "$PYBIN" -m pip install maturin build
+
+          protoc --version
+
+          maturin build \
+            --release \
+            --sdist \
+            --out dist \
+            -m crates/pyluwen/Cargo.toml \
+            --features abi3-py311 \
+            --target x86_64-unknown-linux-musl \
+            --compatibility musllinux_1_1
+
+          chown -R $(id -u):$(id -g) dist || true
+          ls -l dist
+
+      - name: Upload wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-package-musllinux-abi3
+          path: dist/*
